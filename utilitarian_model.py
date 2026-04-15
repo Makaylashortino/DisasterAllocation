@@ -82,7 +82,7 @@ df["fema_per_capita"] = df["fema_per_capita"].fillna(0)
 # Parameters
 n = len(df)                                        # 183 unique regions
 B = df["ia_totalApprovedIhp"].sum()                # total budget
-d_i = df["d_i"].values                               # adjusted need per region
+d_i = df["d_i"].values                             # adjusted need per region
 n_i = df["n_i"].values                             # need per capita per region
 pop = df["population"].values                      # population per region
  
@@ -148,19 +148,14 @@ for i in range(n):
         name=f"MinFloor_{i}"
     ) 
 
-print(f"  Variables   : {model.NumVars}  ({n} continuous x_i + {n} binary y_i)")
-print(f"  Constraints : {model.NumConstrs}")
-print()
- 
+
 # 3.  SOLVE
 model.optimize()
-
 if model.status != GRB.OPTIMAL:
     print(f"WARNING: Solver status = {model.status}")
 else:
     print(f"\nOptimal objective value: {model.ObjVal:,.2f}")
  
-
 
 # 4.  EXTRACT & ANALYZE RESULTS
 results = df[["state", "county", "population", "d_i", "n_i",
@@ -222,7 +217,7 @@ state_summary.to_csv("Results/Utilitarian/utilitarian_state_summary.csv", index=
  
 # print()
  
- 
+# # PR vs TX per-capita ratio (key fairness metric)
 # pr_data = state_summary[state_summary["state"] == "PR"]
 # tx_data = state_summary[state_summary["state"] == "TX"]
  
@@ -242,7 +237,7 @@ state_summary.to_csv("Results/Utilitarian/utilitarian_state_summary.csv", index=
 def gini_coefficient(values):
     """Compute the Gini coefficient of a numpy array of values."""
     values = np.array(values, dtype=float)
-    values = values[values > 0]  # only funded regions for meaningful Gini
+    values = values[values > 0]  # only funded regions
     if len(values) == 0:
         return float('nan')
     sorted_vals = np.sort(values)
