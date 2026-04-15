@@ -2,7 +2,7 @@
 PROBLEM CONTEXT:
     We are reallocating $4.124 billion in FEMA Individual Assistance (IA) across 204 disaster-affected 
     regions from Hurricanes Harvey, Irma, and Maria. The goal is to maximize the minimum per-capita aid 
-    received across all regions, based on Rawlsian social justice theory.
+    received across all regions.
  
 MATHEMATICAL FORMULATION:
     Sets & Indices
@@ -19,16 +19,15 @@ MATHEMATICAL FORMULATION:
         y_i  ∈ {0,1} binary     — 1 if region i receives any aid, 0 otherwise
         z    ∈ R     continuous — the minimum per-capita allocation across all funded regions
 
-    Objective (Maximin / Rawlsian — maximize the worst-off region)
+    Objective (Maximin — maximize the worst-off region)
         max  z
         - We maximize z, an auxiliary variable that represents the minimum per-capita allocation across all 
           regions. This forces the model to keep raising the floor for the least-served region before improving 
           anyone else's allocation. It is the fairness-focused counterpart to the utilitarian model.
  
     Constraints
-    1. Budget constraint: Total aid across all regions must equal the budget. (Equality is required here 
-                          unlike in the utilitarian model, because without it the maximin model would prefer to 
-                          fund nobody and leave z unconstrained.)
+    1. Budget constraint: Total aid across all regions must equal the budget. (If you do <= here, the model would 
+                          just not spend to improve the objective, which is not what we want.)
             Σ_{i ∈ I}  x_i  =  B
  
     2. Non-negativity: No region can receive negative aid.
@@ -49,28 +48,19 @@ MATHEMATICAL FORMULATION:
             y_i  ∈ {0, 1}      for all i ∈ I
 
     7. Maximin linking: z cannot exceed the per-capita allocation of any funded region. For unfunded regions 
-                        (y_i = 0), the constraint is relaxed by adding a large-M term so that z is not forced 
+                        the constraint is relaxed by adding a Big M term so that z is not forced 
                         to zero simply because a region was excluded.
             z  ≤  x_i / p_i  +  M · (1 - y_i)    for all i ∈ I
-       
-       Equivalently (multiplying both sides by p_i to keep it linear):
+       So that Gurobi doesn't break...
             z · p_i  ≤  x_i  +  M · p_i · (1 - y_i)    for all i ∈ I
-
-       Plain English: For every region that IS funded (y_i = 1), z is forced to be at most that region's 
-       per-capita allocation. For regions that are NOT funded (y_i = 0), the big-M term makes the constraint 
-       non-binding so z is not dragged to zero. Since we are maximizing z, at optimality z will equal the 
-       per-capita allocation of whichever funded region received the least per person — the worst-off region.
-
        We set M to be a safely large upper bound: the maximum possible per-capita allocation for any region, 
-       which is max(d_i / p_i) = max(n_i). This is the tightest valid big-M, which helps solver performance.
+       which is max(n_i). This is the tightest valid Big M.
 
 Important notes on data preprocessing:
-    Several regions (mainly in Puerto Rico and USVI) appear multiple times in
-    the raw data because they were struck by more than one hurricane
-    (e.g., Irma then Maria).  We aggregate by (state, county) so that each
-    community is represented exactly once in the model, with its total need and population across all disasters.
-    This is important to ensure that the model allocates aid at the community level rather than splitting it across 
-    multiple rows for the same place.
+    Several regions (mainly in Puerto Rico and USVI) appear multiple times in the raw data because they were struck by 
+    more than one hurricane We aggregate by (state, county) so that each community is represented exactly once in the model,
+    with its total need and population across all disasters. This is important to ensure that the model allocates aid at the 
+    community level rather than splitting it across  multiple rows for the same place.
 """
 
 import pandas as pd
@@ -104,9 +94,9 @@ B = df["ia_totalApprovedIhp"].sum()                # total budget
 d_i = df["d_i"].values                             # adjusted need per region
 n_i = df["n_i"].values                             # need per capita per region
 pop = df["population"].values                      # population per region
-M = n_i.max()                                      # big-M = max per-capita need (tightest valid bound)
+M = n_i.max()                                      # Big M = max per-capita need
  
-print("MODEL 2 — MAXIMIN / RAWLSIAN (Maximize Minimum Per-Capita Allocation)")
+print("MODEL 2 — MAXIMIN (Maximize Minimum Per-Capita Allocation)")
 print(f"  Raw data rows     : {len(raw)}")
 print(f"  After aggregation : {n} unique regions")
 print(f"  Multi-disaster    : {(df['num_disasters'] > 1).sum()} regions hit by 2+ hurricanes")
@@ -134,7 +124,7 @@ for i in range(n):
     y[i] = model.addVar(vtype=GRB.BINARY,
                          name=f"y_{i}_{df.iloc[i]['county']}")
 
-# z : continuous scalar, the minimum per-capita allocation across funded regions
+# z : continuous, the minimum per-capita allocation across funded regions
 z = model.addVar(lb=0.0, ub=GRB.INFINITY, vtype=GRB.CONTINUOUS, name="z")
  
 model.update()
@@ -142,36 +132,34 @@ model.update()
 # Objective: max z
 model.setObjective(z, GRB.MAXIMIZE)
 
-# Constraint 1: Budget (equality — model must spend the full budget)
-# Note: In the utilitarian model, <= works because spending more always improves the objective.
-# In maximin, the model would prefer to fund nobody (z unconstrained), so we force full spending.
+# Constraint 1: Budget
 model.addConstr(
-    gp.quicksum(x[i] for i in range(n)) == B,
+    gp.quicksum(x[i] for i in range(n)) <= B,
     name="Budget"
 )
  
-# Constraint 3: Need cap x_i <= d_i
+# Constraint 3: Need cap
 for i in range(n):
     model.addConstr(
         x[i] <= d_i[i],
         name=f"NeedCap_{i}"
     )
 
-# Constraint 4: Linking upper   x_i <= d_i * y_i
+# Constraint 4: Linking upper
 for i in range(n):
     model.addConstr(
         x[i] <= d_i[i] * y[i],
         name=f"LinkUpper_{i}"
     )
  
-# Constraint 5: Minimum floor   x_i >= 0.10 * d_i * y_i
+# Constraint 5: Minimum floor
 for i in range(n):
     model.addConstr(
         x[i] >= 0.10 * d_i[i] * y[i],
         name=f"MinFloor_{i}"
-    )
+    ) 
 
-# Constraint 7: Maximin linking   z * p_i <= x_i + M * p_i * (1 - y_i)
+# Constraint 7: Maximin linking
 for i in range(n):
     model.addConstr(
         z * pop[i] <= x[i] + M * pop[i] * (1 - y[i]),
@@ -183,9 +171,6 @@ for i in range(n):
 model.optimize()
 if model.status != GRB.OPTIMAL:
     print(f"WARNING: Solver status = {model.status}")
-else:
-    print(f"\nOptimal objective value (z* = min per-capita): ${model.ObjVal:,.2f}")
- 
 
 # 4.  EXTRACT & ANALYZE RESULTS
 results = df[["state", "county", "population", "d_i", "n_i",
