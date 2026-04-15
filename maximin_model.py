@@ -225,6 +225,36 @@ state_summary["per_capita_fema"]   = state_summary["total_fema_actual"] / state_
 
 state_summary.to_csv("Results/Maximin/maximin_state_summary.csv", index=False)
 
+# PR vs TX per-capita ratio (key fairness metric)
+pr_data = state_summary[state_summary["state"] == "PR"]
+tx_data = state_summary[state_summary["state"] == "TX"]
+ 
+if len(pr_data) > 0 and len(tx_data) > 0:
+    pr_pc_maximin = pr_data["per_capita_maximin"].values[0]
+    tx_pc_maximin = tx_data["per_capita_maximin"].values[0]
+    pr_pc_fema = pr_data["per_capita_fema"].values[0]
+    tx_pc_fema = tx_data["per_capita_fema"].values[0]
+ 
+pr_tx_df = pd.DataFrame({
+    "Metric": [
+        "PR per capita (Maximin)",
+        "TX per capita (Maximin)",
+        "PR/TX ratio (Maximin)",
+        "PR per capita (FEMA)",
+        "TX per capita (FEMA)",
+        "PR/TX ratio (FEMA)"
+    ],
+    "Value": [
+        pr_pc_maximin,
+        tx_pc_maximin,
+        pr_pc_maximin / tx_pc_maximin,
+        pr_pc_fema,
+        tx_pc_fema,
+        pr_pc_fema / tx_pc_fema
+    ]
+})
+pr_tx_df.to_csv("Results/Maximin/pr_vs_tx_fairness.csv", index=False)
+
 # Gini coefficient computation (on per-capita allocation)
 def gini_coefficient(values):
     """Compute the Gini coefficient of a numpy array of values."""

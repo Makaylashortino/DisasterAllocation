@@ -203,20 +203,35 @@ state_summary["per_capita_fema"] = state_summary["total_fema_actual"] / state_su
 
 state_summary.to_csv("Results/Utilitarian/utilitarian_state_summary.csv", index=False)
  
-# # PR vs TX per-capita ratio (key fairness metric)
-# pr_data = state_summary[state_summary["state"] == "PR"]
-# tx_data = state_summary[state_summary["state"] == "TX"]
+# PR vs TX per-capita ratio (key fairness metric)
+pr_data = state_summary[state_summary["state"] == "PR"]
+tx_data = state_summary[state_summary["state"] == "TX"]
  
-# if len(pr_data) > 0 and len(tx_data) > 0:
-#     pr_pc_util = pr_data["per_capita_util"].values[0]
-#     tx_pc_util = tx_data["per_capita_util"].values[0]
-#     pr_pc_fema = pr_data["per_capita_fema"].values[0]
-#     tx_pc_fema = tx_data["per_capita_fema"].values[0]
+if len(pr_data) > 0 and len(tx_data) > 0:
+    pr_pc_util = pr_data["per_capita_util"].values[0]
+    tx_pc_util = tx_data["per_capita_util"].values[0]
+    pr_pc_fema = pr_data["per_capita_fema"].values[0]
+    tx_pc_fema = tx_data["per_capita_fema"].values[0]
  
-#     print("HEADLINE FAIRNESS METRIC — PR vs TX Per-Capita Ratio:")
-#     print(f"  Utilitarian model : PR/TX = ${pr_pc_util:,.2f} / ${tx_pc_util:,.2f} = {pr_pc_util/tx_pc_util:.4f}")
-#     print(f"  FEMA actual       : PR/TX = ${pr_pc_fema:,.2f} / ${tx_pc_fema:,.2f} = {pr_pc_fema/tx_pc_fema:.4f}")
-#     print()# # Key fairness metric: PR vs TX per-capita ratio
+pr_tx_df = pd.DataFrame({
+    "Metric": [
+        "PR per capita (Utilitarian)",
+        "TX per capita (Utilitarian)",
+        "PR/TX ratio (Utilitarian)",
+        "PR per capita (FEMA)",
+        "TX per capita (FEMA)",
+        "PR/TX ratio (FEMA)"
+    ],
+    "Value": [
+        pr_pc_util,
+        tx_pc_util,
+        pr_pc_util / tx_pc_util,
+        pr_pc_fema,
+        tx_pc_fema,
+        pr_pc_fema / tx_pc_fema
+    ]
+})
+pr_tx_df.to_csv("Results/Utilitarian/pr_vs_tx_fairness.csv", index=False)
 
  
 # Gini coefficient computation (on per-capita allocation)
