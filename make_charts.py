@@ -38,11 +38,11 @@ CARD    = '#f9fafb'
 STATE_C = {'PR': '#7c3aed', 'TX': '#ea580c', 'FL': '#0891b2', 'VI': '#db2777', 'GA': '#6b7280', 'SC': '#6b7280'}
 
 def save(fig, name):
-    fig.savefig(f"/Results/Charts/{name}.jpg", format='jpeg', facecolor=fig.get_facecolor())
+    fig.savefig(f"Results/Charts/{name}.jpg", format='jpeg', facecolor=fig.get_facecolor())
     plt.close(fig)
 
-util = pd.read_csv("/Results/Utilitarian/utilitarian_results.csv")
-maxi = pd.read_csv("/Results/Maximin/maximin_results.csv")
+util = pd.read_csv("Results/Utilitarian/utilitarian_results.csv")
+maxi = pd.read_csv("Results/Maximin/maximin_results.csv")
 
 m = util[["state","county","population","d_i","n_i","ia_totalApprovedIhp","fema_per_capita"]].copy()
 m["util_alloc"] = util["x_i_utilitarian"]
