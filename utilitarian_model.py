@@ -171,21 +171,32 @@ results["x_i_utilitarian"]  = [x[i].X for i in range(n)]
 results["y_i"]              = [int(round(y[i].X)) for i in range(n)]
 results["pct_need_met"]     = results["x_i_utilitarian"] / results["d_i"] * 100
 results["per_capita_alloc"] = results["x_i_utilitarian"] / results["population"]
+
+results.to_csv("Results/Utilitarian/utilitarian_results.csv", index=False)
  
 # Summary statistics
 total_alloc = results["x_i_utilitarian"].sum()
 regions_funded = results["y_i"].sum()
- 
-print("RESULTS SUMMARY")
-print(f"  Total allocated          : ${total_alloc:,.2f}")
-print(f"  Budget                   : ${B:,.2f}")
-print(f"  Budget used              : {100 * total_alloc / B:.4f}%")
-print(f"  Regions funded (y_i = 1) : {regions_funded} / {n}")
-print(f"  Regions excluded (y_i=0) : {n - regions_funded}")
-print()
- 
+
+summary_df = pd.DataFrame({
+    "Metric": [
+        "Total Allocated",
+        "Budget",
+        "Budget Used (%)",
+        "Regions Funded",
+        "Regions Excluded"
+    ],
+    "Value": [
+        total_alloc,
+        B,
+        100 * total_alloc / B,
+        regions_funded / n,
+        n - regions_funded
+    ]
+})
+summary_df.to_csv("Results/Utilitarian/utilitarian_summary.csv", index=False)
+
 # Per-state summary
-print("PER-STATE ALLOCATION SUMMARY:")
 state_summary = results.groupby("state").agg(
     num_regions=("county", "count"),
     total_need=("d_i", "sum"),
@@ -198,32 +209,34 @@ state_summary = results.groupby("state").agg(
 state_summary["pct_need_met"]    = state_summary["total_allocation"] / state_summary["total_need"] * 100
 state_summary["per_capita_util"] = state_summary["total_allocation"] / state_summary["total_pop"]
 state_summary["per_capita_fema"] = state_summary["total_fema_actual"] / state_summary["total_pop"]
+
+state_summary.to_csv("Results/Utilitarian/utilitarian_state_summary.csv", index=False)
  
-for _, row in state_summary.iterrows():
-    print(f"  {row['state']:>2s}: {row['num_regions']:3.0f} regions | "
-          f"Allocated ${row['total_allocation']:>15,.2f} | "
-          f"FEMA Actual ${row['total_fema_actual']:>15,.2f} | "
-          f"Need Met {row['pct_need_met']:6.2f}% | "
-          f"Per Cap (Util) ${row['per_capita_util']:>8,.2f} | "
-          f"Per Cap (FEMA) ${row['per_capita_fema']:>8,.2f}")
+# for _, row in state_summary.iterrows():
+#     print(f"  {row['state']:>2s}: {row['num_regions']:3.0f} regions | "
+#           f"Allocated ${row['total_allocation']:>15,.2f} | "
+#           f"FEMA Actual ${row['total_fema_actual']:>15,.2f} | "
+#           f"Need Met {row['pct_need_met']:6.2f}% | "
+#           f"Per Cap (Util) ${row['per_capita_util']:>8,.2f} | "
+#           f"Per Cap (FEMA) ${row['per_capita_fema']:>8,.2f}")
  
-print()
+# print()
  
  
-# Key fairness metric: PR vs TX per-capita ratio
-pr_data = state_summary[state_summary["state"] == "PR"]
-tx_data = state_summary[state_summary["state"] == "TX"]
+# pr_data = state_summary[state_summary["state"] == "PR"]
+# tx_data = state_summary[state_summary["state"] == "TX"]
  
-if len(pr_data) > 0 and len(tx_data) > 0:
-    pr_pc_util = pr_data["per_capita_util"].values[0]
-    tx_pc_util = tx_data["per_capita_util"].values[0]
-    pr_pc_fema = pr_data["per_capita_fema"].values[0]
-    tx_pc_fema = tx_data["per_capita_fema"].values[0]
+# if len(pr_data) > 0 and len(tx_data) > 0:
+#     pr_pc_util = pr_data["per_capita_util"].values[0]
+#     tx_pc_util = tx_data["per_capita_util"].values[0]
+#     pr_pc_fema = pr_data["per_capita_fema"].values[0]
+#     tx_pc_fema = tx_data["per_capita_fema"].values[0]
  
-    print("HEADLINE FAIRNESS METRIC — PR vs TX Per-Capita Ratio:")
-    print(f"  Utilitarian model : PR/TX = ${pr_pc_util:,.2f} / ${tx_pc_util:,.2f} = {pr_pc_util/tx_pc_util:.4f}")
-    print(f"  FEMA actual       : PR/TX = ${pr_pc_fema:,.2f} / ${tx_pc_fema:,.2f} = {pr_pc_fema/tx_pc_fema:.4f}")
-    print()
+#     print("HEADLINE FAIRNESS METRIC — PR vs TX Per-Capita Ratio:")
+#     print(f"  Utilitarian model : PR/TX = ${pr_pc_util:,.2f} / ${tx_pc_util:,.2f} = {pr_pc_util/tx_pc_util:.4f}")
+#     print(f"  FEMA actual       : PR/TX = ${pr_pc_fema:,.2f} / ${tx_pc_fema:,.2f} = {pr_pc_fema/tx_pc_fema:.4f}")
+#     print()# # Key fairness metric: PR vs TX per-capita ratio
+
  
 # Gini coefficient computation (on per-capita allocation)
 def gini_coefficient(values):
@@ -240,46 +253,21 @@ def gini_coefficient(values):
 gini_util = gini_coefficient(results["per_capita_alloc"].values)
 gini_fema = gini_coefficient(results["fema_per_capita"].values)
  
-print("GINI COEFFICIENTS (per-capita allocation, lower = more equal):")
-print(f"  Utilitarian model : {gini_util:.4f}")
-print(f"  FEMA actual       : {gini_fema:.4f}")
-print()
+gini_df = pd.DataFrame({
+    "Metric": ["Gini (Utilitarian)", "Gini (FEMA)"],
+    "Value": [gini_util, gini_fema]
+})
+gini_df.to_csv("Results/Utilitarian/gini_coefficients.csv", index=False)
  
 # Top 10 and Bottom 10 regions by allocation
-print("TOP 10 REGIONS BY UTILITARIAN PER-CAPITA ALLOCATION:")
 top10 = results.nlargest(10, "per_capita_alloc")
-for _, row in top10.iterrows():
-    print(f"  {row['county']:>30s}, {row['state']} | "
-          f"Per Cap ${row['per_capita_alloc']:>10,.2f} | "
-          f"Need Met {row['pct_need_met']:6.2f}% | "
-          f"n_i = {row['n_i']:>10,.2f}")
-print()
+top10.to_csv("Results/Utilitarian/top10_utilitarian.csv", index=False)
  
-print("BOTTOM 10 FUNDED REGIONS BY UTILITARIAN PER-CAPITA ALLOCATION:")
 funded = results[results["y_i"] == 1]
 bottom10 = funded.nsmallest(10, "per_capita_alloc")
-for _, row in bottom10.iterrows():
-    print(f"  {row['county']:>30s}, {row['state']} | "
-          f"Per Cap ${row['per_capita_alloc']:>10,.2f} | "
-          f"Need Met {row['pct_need_met']:6.2f}% | "
-          f"n_i = {row['n_i']:>10,.2f}")
-print()
- 
+bottom10.to_csv("Results/Utilitarian/bottom10_utilitarian.csv", index=False)
+
 # Excluded regions (if any)
 excluded = results[results["y_i"] == 0]
 if len(excluded) > 0:
-    print(f"EXCLUDED REGIONS: {len(excluded)} regions")
-    for _, row in excluded.iterrows():
-        print(f"  {row['county']:>30s}, {row['state']} | "
-              f"d_i = ${row['d_i']:>15,.2f} | "
-              f"n_i = {row['n_i']:>10,.4f}")
-    print()
- 
-# 5.  SAVE RESULTS
-output_path = "Results/utilitarian_results.csv"
-results.to_csv(output_path, index=False)
-
-with pd.ExcelWriter("Results/utilitarian_full_output.xlsx") as writer:
-    results.to_excel(writer, sheet_name="Region Results", index=False)
-    state_summary.to_excel(writer, sheet_name="State Summary", index=False)
-    summary_df.to_excel(writer, sheet_name="Overall Summary", index=False)
+    excluded.to_csv("Results/Utilitarian/excluded_regions.csv", index=False)
