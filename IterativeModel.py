@@ -124,5 +124,5 @@ print(f"  Overall % need met:    {results['x_i'].sum() / results['d_i'].sum() * 
 print(f"  Regions receiving aid: {sum(1 for a in allocation if a > 0)} of {len(df)}")
 
 
-results.to_csv("IterativeModel_Results.csv", index=False)
+results.to_csv("Results/IterativeModel_Results.csv", index=False)
 print(f"\nSaved to: IterativeModel_Results.csv")
