@@ -46,12 +46,10 @@ MATHEMATICAL FORMULATION:
             y_i  ∈ {0, 1}      for all i ∈ I
 
 Important notes on data preprocessing:
-    Several regions (mainly in Puerto Rico and USVI) appear multiple times in
-    the raw data because they were struck by more than one hurricane
-    (e.g., Irma then Maria).  We aggregate by (state, county) so that each
-    community is represented exactly once in the model, with its total need and population across all disasters.
-    This is important to ensure that the model allocates aid at the community level rather than splitting it across 
-    multiple rows for the same place.
+    Several regions (mainly in Puerto Rico and USVI) appear multiple times in the raw data because they were struck by 
+    more than one hurricane We aggregate by (state, county) so that each community is represented exactly once in the model,
+    with its total need and population across all disasters. This is important to ensure that the model allocates aid at the 
+    community level rather than splitting it across  multiple rows for the same place.
 """
 
 import pandas as pd
