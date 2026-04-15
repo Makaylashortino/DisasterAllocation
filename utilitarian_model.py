@@ -125,21 +125,21 @@ model.addConstr(
     name="Budget"
 )
  
-# Constraint 3: Need cap x_i <= d_i
+# Constraint 3: Need cap
 for i in range(n):
     model.addConstr(
         x[i] <= d_i[i],
         name=f"NeedCap_{i}"
     )
 
-# Constraint 4: Linking upper   x_i <= d_i * y_i
+# Constraint 4: Linking upper
 for i in range(n):
     model.addConstr(
         x[i] <= d_i[i] * y[i],
         name=f"LinkUpper_{i}"
     )
  
-# Constraint 5: Minimum floor   x_i >= 0.10 * d_i * y_i
+# Constraint 5: Minimum floor
 for i in range(n):
     model.addConstr(
         x[i] >= 0.10 * d_i[i] * y[i],
@@ -151,8 +151,6 @@ for i in range(n):
 model.optimize()
 if model.status != GRB.OPTIMAL:
     print(f"WARNING: Solver status = {model.status}")
-else:
-    print(f"\nOptimal objective value: {model.ObjVal:,.2f}")
  
 
 # 4.  EXTRACT & ANALYZE RESULTS
@@ -204,16 +202,6 @@ state_summary["per_capita_util"] = state_summary["total_allocation"] / state_sum
 state_summary["per_capita_fema"] = state_summary["total_fema_actual"] / state_summary["total_pop"]
 
 state_summary.to_csv("Results/Utilitarian/utilitarian_state_summary.csv", index=False)
- 
-# for _, row in state_summary.iterrows():
-#     print(f"  {row['state']:>2s}: {row['num_regions']:3.0f} regions | "
-#           f"Allocated ${row['total_allocation']:>15,.2f} | "
-#           f"FEMA Actual ${row['total_fema_actual']:>15,.2f} | "
-#           f"Need Met {row['pct_need_met']:6.2f}% | "
-#           f"Per Cap (Util) ${row['per_capita_util']:>8,.2f} | "
-#           f"Per Cap (FEMA) ${row['per_capita_fema']:>8,.2f}")
- 
-# print()
  
 # # PR vs TX per-capita ratio (key fairness metric)
 # pr_data = state_summary[state_summary["state"] == "PR"]
