@@ -134,7 +134,7 @@ model.setObjective(z, GRB.MAXIMIZE)
 
 # Constraint 1: Budget
 model.addConstr(
-    gp.quicksum(x[i] for i in range(n)) <= B,
+    gp.quicksum(x[i] for i in range(n)) == B,
     name="Budget"
 )
  
