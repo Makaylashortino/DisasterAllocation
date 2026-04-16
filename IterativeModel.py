@@ -15,6 +15,18 @@ d_i            = df["d_i"].values.copy()
 iteration = 0
 max_iterations = 1_000_000
 
+print("\nApplying 10% floor allocation...")
+for i in range(len(df)):
+    floor = 0.10 * d_i[i]
+    floor = min(floor, remaining_budget)
+    allocation[i] += floor
+    remaining_need[i] -= floor
+    remaining_budget -= floor
+
+print(f"After floor pass:")
+print(f"  Remaining budget: ${remaining_budget:,.2f}")
+print(f"  Budget used on floors: ${B - remaining_budget:,.2f}")
+
 while remaining_budget > 0.01 and iteration < max_iterations:
 
     priority = []
@@ -139,5 +151,5 @@ fema_gini  = gini(results["fema_per_capita"].tolist())
 print(f"\n  Gini (iterative model): {model_gini:.4f}")
 print(f"  Gini (FEMA actual):     {fema_gini:.4f}")
 
-results.to_csv("Results/IterativeModel_Results.csv", index=False)
+results.to_csv("Results/Iterative/IterativeModel_Results.csv", index=False)
 print(f"\nSaved to: IterativeModel_Results.csv")
