@@ -46,10 +46,17 @@ ia["county"] = ia.apply(
 print(f"After cleanup: {len(ia):,} rows")
  
 # ══════════════════════════════════════════════════════════════════════════════
-# STEP 2: Apply denial rate multipliers to get d_i and adjusted_applicants
+# STEP 2: Apply denial rate multipliers to get d_i
 # Source: National Low Income Housing Coalition (2019)
 # Puerto Rico: 60% denied -> multiplier 2.50
 # All others:  30% denied -> multiplier 1.43
+#
+# IMPORTANT: denial_multiplier goes in numerator (d_i) ONLY
+# Denominator uses raw ia_validRegistrations (observed applicants)
+# This keeps the adjustment meaningful in n_i:
+#   n_i = d_i / ia_validRegistrations
+#       = (approved_IHP * denial_multiplier) / raw_applicants
+# If we used adjusted_applicants in denominator the multiplier cancels out
 # ══════════════════════════════════════════════════════════════════════════════
 DENIAL_MULTIPLIERS = {
     4332: 1 / 0.70,  # Harvey - Texas         (30% denied, NLIHC 2019)
@@ -64,12 +71,8 @@ DENIAL_MULTIPLIERS = {
  
 ia["denial_multiplier"] = ia["disasterNumber"].map(DENIAL_MULTIPLIERS)
  
-# d_i = approved IHP scaled up by denial multiplier
+# d_i = approved IHP scaled up by denial multiplier (adjusted need)
 ia["d_i"] = ia["ia_totalApprovedIhp"] * ia["denial_multiplier"]
- 
-# adjusted_applicants = valid registrations scaled up by denial multiplier
-# estimates total applicants including those who were denied
-ia["adjusted_applicants"] = ia["ia_validRegistrations"] * ia["denial_multiplier"]
  
 print(f"\nDenial multipliers applied:")
 print(f"  Puerto Rico: 2.50x (60% denial rate, NLIHC 2019)")
@@ -166,12 +169,17 @@ else:
     print(f"\nRow count unchanged after merge -- no duplicates introduced")
  
 # ══════════════════════════════════════════════════════════════════════════════
-# STEP 6: Compute n_i = d_i / adjusted_applicants
-# This is need per affected applicant (denial-adjusted)
+# STEP 6: Compute n_i = d_i / ia_validRegistrations
+#
+# n_i = adjusted need per OBSERVED applicant
+# Numerator: d_i already includes denial multiplier (true need estimate)
+# Denominator: raw observed applicants (concrete, observable quantity)
+# This preserves the denial adjustment signal in n_i since the
+# multiplier does NOT cancel out with raw registrations in denominator
 # ══════════════════════════════════════════════════════════════════════════════
-final["n_i"]             = final["d_i"] / final["adjusted_applicants"]
-final["fema_per_capita"] = final["ia_totalApprovedIhp"] / final["population"]
-final["fema_per_applicant"] = final["ia_totalApprovedIhp"] / final["adjusted_applicants"]
+final["n_i"]               = final["d_i"] / final["ia_validRegistrations"]
+final["fema_per_capita"]   = final["ia_totalApprovedIhp"] / final["population"]
+final["fema_per_applicant"]= final["ia_totalApprovedIhp"] / final["ia_validRegistrations"]
  
 # ══════════════════════════════════════════════════════════════════════════════
 # STEP 7: Summary
@@ -197,19 +205,19 @@ for dr, label in DR_NAMES.items():
         continue
     total_d      = sub["d_i"].sum()
     total_pop    = sub["population"].sum()
-    total_apps   = sub["adjusted_applicants"].sum()
+    total_apps   = sub["ia_validRegistrations"].sum()
     avg_n        = sub["n_i"].mean()
     total_fema   = sub["ia_totalApprovedIhp"].sum()
     pct_met      = (total_fema / total_d * 100) if total_d > 0 else 0
  
     print(f"\nDR-{dr} - {label}")
-    print(f"  Counties/regions:         {len(sub)}")
-    print(f"  Total d_i (need):         ${total_d:>15,.2f}")
-    print(f"  Total population:         {total_pop:>15,.0f}")
-    print(f"  Total adj. applicants:    {total_apps:>15,.0f}")
-    print(f"  Avg n_i (need/applicant): ${avg_n:>15,.4f}")
-    print(f"  FEMA actual (raw):        ${total_fema:>15,.2f}")
-    print(f"  FEMA met:                 {pct_met:.1f}% of adjusted need")
+    print(f"  Counties/regions:              {len(sub)}")
+    print(f"  Total d_i (need):              ${total_d:>15,.2f}")
+    print(f"  Total population:              {total_pop:>15,.0f}")
+    print(f"  Total raw applicants:          {total_apps:>15,.0f}")
+    print(f"  Avg n_i (need/applicant):      ${avg_n:>15,.4f}")
+    print(f"  FEMA actual (raw):             ${total_fema:>15,.2f}")
+    print(f"  FEMA met:                      {pct_met:.1f}% of adjusted need")
  
 # ══════════════════════════════════════════════════════════════════════════════
 # STEP 8: Save
@@ -217,9 +225,8 @@ for dr, label in DR_NAMES.items():
 output_cols = [c for c in [
     "disasterNumber", "state", "county",
     "ia_totalApprovedIhp", "denial_multiplier",
-    "d_i", "population", "n_i",
-    "ia_validRegistrations", "adjusted_applicants",
-    "fema_per_capita", "fema_per_applicant"
+    "d_i", "population", "ia_validRegistrations",
+    "n_i", "fema_per_capita", "fema_per_applicant"
 ] if c in final.columns]
  
 final[output_cols].to_csv("ModelingInput.csv", index=False)
@@ -230,3 +237,4 @@ print(f"Total regions:                {len(final):,}")
 print(f"Total d_i (adjusted need):    ${final['d_i'].sum():,.2f}")
 print(f"Total budget B (FEMA actual): ${final['ia_totalApprovedIhp'].sum():,.2f}")
 print(f"Overall FEMA met:             {final['ia_totalApprovedIhp'].sum() / final['d_i'].sum() * 100:.1f}% of total adjusted need")
+ 

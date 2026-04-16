@@ -3,14 +3,18 @@ import os
  
 df = pd.read_csv("Data/ModelingInput.csv", low_memory=False)
 B = df["ia_totalApprovedIhp"].sum()
-print(f"Total budget B= {B}")
+print(f"Total budget B= ${B:,.2f}")
 increment_pct = 0.01
  
-remaining_need        = df["d_i"].values.copy()
-allocation            = [0.0] * len(df)
-remaining_budget      = B
-adjusted_applicants   = df["adjusted_applicants"].values.copy()  # NEW: use applicants not population
-d_i                   = df["d_i"].values.copy()
+# ── Setup arrays ──────────────────────────────────────────────────────────────
+remaining_need   = df["d_i"].values.copy()
+allocation       = [0.0] * len(df)
+remaining_budget = B
+# Use raw observed applicants as denominator (not adjusted)
+# n_i = d_i / ia_validRegistrations preserves denial multiplier signal
+# Using adjusted_applicants would cancel out the multiplier
+raw_applicants   = df["ia_validRegistrations"].values.copy()
+d_i              = df["d_i"].values.copy()
  
 iteration = 0
 max_iterations = 1_000_000
@@ -29,13 +33,14 @@ print(f"  Remaining budget:      ${remaining_budget:,.2f}")
 print(f"  Budget used on floors: ${B - remaining_budget:,.2f}")
  
 # ── Main iterative loop ───────────────────────────────────────────────────────
+# Priority = remaining need per raw observed applicant
+# Higher priority = more remaining need per person who asked for help
 while remaining_budget > 0.01 and iteration < max_iterations:
  
-    # Priority = remaining need per adjusted applicant
     priority = []
     for i in range(len(df)):
-        if remaining_need[i] > 0 and adjusted_applicants[i] > 0:
-            priority.append(remaining_need[i] / adjusted_applicants[i])
+        if remaining_need[i] > 0 and raw_applicants[i] > 0:
+            priority.append(remaining_need[i] / raw_applicants[i])
         else:
             priority.append(0.0)
  
@@ -50,6 +55,7 @@ while remaining_budget > 0.01 and iteration < max_iterations:
         if abs(p - max_priority) < 1e-6:
             candidates.append(i)
  
+    # Tie break: highest total d_i
     chosen = max(candidates, key=lambda i: d_i[i])
  
     increment = increment_pct * remaining_need[chosen]
@@ -74,10 +80,10 @@ print(f"Regions funded:   {sum(1 for a in allocation if a > 0)} of {len(df)}")
  
 # ── Results ───────────────────────────────────────────────────────────────────
 results = df.copy()
-results["x_i"]                  = allocation
-results["pct_need_met"]         = results["x_i"] / results["d_i"] * 100
-results["per_applicant_alloc"]  = results["x_i"] / results["adjusted_applicants"]
-results["fema_per_applicant"]   = results["ia_totalApprovedIhp"] / results["adjusted_applicants"]
+results["x_i"]                 = allocation
+results["pct_need_met"]        = results["x_i"] / results["d_i"] * 100
+results["per_applicant_alloc"] = results["x_i"] / results["ia_validRegistrations"]
+results["fema_per_applicant"]  = results["ia_totalApprovedIhp"] / results["ia_validRegistrations"]
  
 # ── Summary by disaster ───────────────────────────────────────────────────────
 DR_NAMES = {
@@ -100,13 +106,13 @@ for dr, label in DR_NAMES.items():
     if len(sub) == 0:
         continue
  
-    total_alloc      = sub["x_i"].sum()
-    total_need       = sub["d_i"].sum()
-    total_fema       = sub["ia_totalApprovedIhp"].sum()
-    avg_pct_met      = sub["pct_need_met"].mean()
-    avg_per_app      = sub["per_applicant_alloc"].mean()
-    fema_per_app     = sub["fema_per_applicant"].mean()
-    fema_pct_met     = (total_fema / total_need * 100) if total_need > 0 else 0
+    total_alloc  = sub["x_i"].sum()
+    total_need   = sub["d_i"].sum()
+    total_fema   = sub["ia_totalApprovedIhp"].sum()
+    avg_pct_met  = sub["pct_need_met"].mean()
+    avg_per_app  = sub["per_applicant_alloc"].mean()
+    fema_per_app = sub["fema_per_applicant"].mean()
+    fema_pct_met = (total_fema / total_need * 100) if total_need > 0 else 0
  
     print(f"\nDR-{dr} - {label}")
     print(f"  Regions:                    {len(sub)}")
@@ -157,5 +163,5 @@ print(f"  (Lower = more equal distribution)")
  
 # ── Save ──────────────────────────────────────────────────────────────────────
 os.makedirs("Results", exist_ok=True)
-results.to_csv("Results/IterativeModel_Test_Results.csv", index=False)
-print(f"\nSaved to: Results/IterativeModel_Test_Results.csv")
+results.to_csv("Results/IterativeModel_Results.csv", index=False)
+print(f"\nSaved to: Results/IterativeModel_Results.csv")
