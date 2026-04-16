@@ -1,8 +1,8 @@
 """
 PROBLEM CONTEXT:
     We are reallocating $4.124 billion in FEMA Individual Assistance (IA) across 204 disaster-affected 
-    regions from Hurricanes Harvey, Irma, and Maria. The goal is to maximize total weighted societal benefit, 
-    where each region's weight is its need-per-capita (n_i).
+    regions from Hurricanes Harvey, Irma, and Maria. The goal is to maximize the minimum per-capita aid 
+    received across all regions.
  
 MATHEMATICAL FORMULATION:
     Sets & Indices
@@ -17,16 +17,18 @@ MATHEMATICAL FORMULATION:
     Decision Variables
         x_i  ∈ R+    continuous — dollars allocated to region i
         y_i  ∈ {0,1} binary     — 1 if region i receives any aid, 0 otherwise
+        z    ∈ R     continuous — the minimum per-capita allocation across all funded regions
 
-    Objective (Utilitarian — maximize weighted benefit)
-        max  Σ_{i ∈ I} n_i · x_i
-        - We want to maximize the total benefit across all regions, where each dollar of aid is weighted by 
-          how badly that region needs it on a per-capita basis. Regions with higher need-per-capita get a higher 
-          value in the objective, so the optimizer naturally prioritizes them.
+    Objective (Maximin — maximize the worst-off region)
+        max  z
+        - We maximize z, an auxiliary variable that represents the minimum per-capita allocation across all 
+          regions. This forces the model to keep raising the floor for the least-served region before improving 
+          anyone else's allocation. It is the fairness-focused counterpart to the utilitarian model.
  
     Constraints
-    1. Budget constraint: Total aid across all regions cannot exceed the budget.
-            Σ_{i ∈ I}  x_i  ≤  B
+    1. Budget constraint: Total aid across all regions must equal the budget. (If you do <= here, the model would 
+                          just not spend to improve the objective, which is not what we want.)
+            Σ_{i ∈ I}  x_i  =  B
  
     2. Non-negativity: No region can receive negative aid.
             x_i  ≥  0  for all i ∈ I
@@ -44,6 +46,15 @@ MATHEMATICAL FORMULATION:
  
     6. Binary integrality: Whether or not region i recieves any aid.
             y_i  ∈ {0, 1}      for all i ∈ I
+
+    7. Maximin linking: z cannot exceed the per-capita allocation of any funded region. For unfunded regions 
+                        the constraint is relaxed by adding a Big M term so that z is not forced 
+                        to zero simply because a region was excluded.
+            z  ≤  x_i / p_i  +  M · (1 - y_i)    for all i ∈ I
+       So that Gurobi doesn't break...
+            z · p_i  ≤  x_i  +  M · p_i · (1 - y_i)    for all i ∈ I
+       We set M to be a safely large upper bound: the maximum possible per-capita allocation for any region, 
+       which is max(n_i). This is the tightest valid Big M.
 
 Important notes on data preprocessing:
     Several regions (mainly in Puerto Rico and USVI) appear multiple times in the raw data because they were struck by 
@@ -83,18 +94,20 @@ B = df["ia_totalApprovedIhp"].sum()                # total budget
 d_i = df["d_i"].values                             # adjusted need per region
 n_i = df["n_i"].values                             # need per capita per region
 pop = df["population"].values                      # population per region
+M = n_i.max()                                      # Big M = max per-capita need
  
-print("MODEL 1 — UTILITARIAN (Weighted Social Welfare Maximization)")
+print("MODEL 2 — MAXIMIN (Maximize Minimum Per-Capita Allocation)")
 print(f"  Raw data rows     : {len(raw)}")
 print(f"  After aggregation : {n} unique regions")
 print(f"  Multi-disaster    : {(df['num_disasters'] > 1).sum()} regions hit by 2+ hurricanes")
 print(f"  Total budget  (B) : ${B:,.2f}")
 print(f"  Total need (Σd_i) : ${d_i.sum():,.2f}")
 print(f"  Budget / Need     : {B / d_i.sum():.4f}  ({100*B/d_i.sum():.2f}% of total need)")
+print(f"  Big-M value       : {M:,.2f} (= max n_i)")
 print()
  
 # 2.  BUILD THE GUROBI MODEL
-model = gp.Model("Utilitarian_Disaster_Relief")
+model = gp.Model("Maximin_Disaster_Relief")
 model.setParam("OutputFlag", 1)          # show solver log
 model.setParam("MIPGap", 1e-6)          # tight optimality gap
  
@@ -110,18 +123,18 @@ y = {}
 for i in range(n):
     y[i] = model.addVar(vtype=GRB.BINARY,
                          name=f"y_{i}_{df.iloc[i]['county']}")
+
+# z : continuous, the minimum per-capita allocation across funded regions
+z = model.addVar(lb=0.0, ub=GRB.INFINITY, vtype=GRB.CONTINUOUS, name="z")
  
 model.update()
  
-# Objective: max Σ n_i * x_i 
-model.setObjective(
-    gp.quicksum(n_i[i] * x[i] for i in range(n)),
-    GRB.MAXIMIZE
-)
+# Objective: max z
+model.setObjective(z, GRB.MAXIMIZE)
 
 # Constraint 1: Budget
 model.addConstr(
-    gp.quicksum(x[i] for i in range(n)) <= B,
+    gp.quicksum(x[i] for i in range(n)) == B,
     name="Budget"
 )
  
@@ -146,28 +159,35 @@ for i in range(n):
         name=f"MinFloor_{i}"
     ) 
 
+# Constraint 7: Maximin linking
+for i in range(n):
+    model.addConstr(
+        z * pop[i] <= x[i] + M * pop[i] * (1 - y[i]),
+        name=f"Maximin_{i}"
+    )
+
 
 # 3.  SOLVE
 model.optimize()
 if model.status != GRB.OPTIMAL:
     print(f"WARNING: Solver status = {model.status}")
- 
 
 # 4.  EXTRACT & ANALYZE RESULTS
 results = df[["state", "county", "population", "d_i", "n_i",
               "ia_totalApprovedIhp", "fema_per_capita",
               "num_disasters", "disaster_list"]].copy()
  
-results["x_i_utilitarian"]  = [x[i].X for i in range(n)]
+results["x_i_maximin"]      = [x[i].X for i in range(n)]
 results["y_i"]              = [int(round(y[i].X)) for i in range(n)]
-results["pct_need_met"]     = results["x_i_utilitarian"] / results["d_i"] * 100
-results["per_capita_alloc"] = results["x_i_utilitarian"] / results["population"]
+results["pct_need_met"]     = results["x_i_maximin"] / results["d_i"] * 100
+results["per_capita_alloc"] = results["x_i_maximin"] / results["population"]
 
-results.to_csv("Results/Utilitarian/utilitarian_results.csv", index=False)
+results.to_csv("Results/Maximin/maximin_results.csv", index=False)
  
 # Summary statistics
-total_alloc = results["x_i_utilitarian"].sum()
+total_alloc = results["x_i_maximin"].sum()
 regions_funded = results["y_i"].sum()
+z_star = z.X
 
 summary_df = pd.DataFrame({
     "Metric": [
@@ -175,65 +195,66 @@ summary_df = pd.DataFrame({
         "Budget",
         "Budget Used (%)",
         "Regions Funded",
-        "Regions Excluded"
+        "Regions Excluded",
+        "z* (Min Per-Capita)"
     ],
     "Value": [
         total_alloc,
         B,
         100 * total_alloc / B,
         regions_funded / n,
-        n - regions_funded
+        n - regions_funded,
+        z_star
     ]
 })
-summary_df.to_csv("Results/Utilitarian/utilitarian_summary.csv", index=False)
+summary_df.to_csv("Results/Maximin/maximin_summary.csv", index=False)
 
 # Per-state summary
 state_summary = results.groupby("state").agg(
     num_regions=("county", "count"),
     total_need=("d_i", "sum"),
-    total_allocation=("x_i_utilitarian", "sum"),
+    total_allocation=("x_i_maximin", "sum"),
     total_fema_actual=("ia_totalApprovedIhp", "sum"),
     total_pop=("population", "sum"),
     regions_funded=("y_i", "sum")
 ).reset_index()
  
-state_summary["pct_need_met"]    = state_summary["total_allocation"] / state_summary["total_need"] * 100
-state_summary["per_capita_util"] = state_summary["total_allocation"] / state_summary["total_pop"]
-state_summary["per_capita_fema"] = state_summary["total_fema_actual"] / state_summary["total_pop"]
+state_summary["pct_need_met"]      = state_summary["total_allocation"] / state_summary["total_need"] * 100
+state_summary["per_capita_maximin"] = state_summary["total_allocation"] / state_summary["total_pop"]
+state_summary["per_capita_fema"]   = state_summary["total_fema_actual"] / state_summary["total_pop"]
 
-state_summary.to_csv("Results/Utilitarian/utilitarian_state_summary.csv", index=False)
- 
+state_summary.to_csv("Results/Maximin/maximin_state_summary.csv", index=False)
+
 # PR vs TX per-capita ratio (key fairness metric)
 pr_data = state_summary[state_summary["state"] == "PR"]
 tx_data = state_summary[state_summary["state"] == "TX"]
  
 if len(pr_data) > 0 and len(tx_data) > 0:
-    pr_pc_util = pr_data["per_capita_util"].values[0]
-    tx_pc_util = tx_data["per_capita_util"].values[0]
+    pr_pc_maximin = pr_data["per_capita_maximin"].values[0]
+    tx_pc_maximin = tx_data["per_capita_maximin"].values[0]
     pr_pc_fema = pr_data["per_capita_fema"].values[0]
     tx_pc_fema = tx_data["per_capita_fema"].values[0]
  
 pr_tx_df = pd.DataFrame({
     "Metric": [
-        "PR per capita (Utilitarian)",
-        "TX per capita (Utilitarian)",
-        "PR/TX ratio (Utilitarian)",
+        "PR per capita (Maximin)",
+        "TX per capita (Maximin)",
+        "PR/TX ratio (Maximin)",
         "PR per capita (FEMA)",
         "TX per capita (FEMA)",
         "PR/TX ratio (FEMA)"
     ],
     "Value": [
-        pr_pc_util,
-        tx_pc_util,
-        pr_pc_util / tx_pc_util,
+        pr_pc_maximin,
+        tx_pc_maximin,
+        pr_pc_maximin / tx_pc_maximin,
         pr_pc_fema,
         tx_pc_fema,
         pr_pc_fema / tx_pc_fema
     ]
 })
-pr_tx_df.to_csv("Results/Utilitarian/pr_vs_tx_fairness.csv", index=False)
+pr_tx_df.to_csv("Results/Maximin/pr_vs_tx_fairness.csv", index=False)
 
- 
 # Gini coefficient computation (on per-capita allocation)
 def gini_coefficient(values):
     """Compute the Gini coefficient of a numpy array of values."""
@@ -246,24 +267,24 @@ def gini_coefficient(values):
     gini = (2.0 * np.sum((np.arange(1, n_vals + 1) * sorted_vals))) / (n_vals * np.sum(sorted_vals)) - (n_vals + 1) / n_vals
     return gini
  
-gini_util = gini_coefficient(results["per_capita_alloc"].values)
-gini_fema = gini_coefficient(results["fema_per_capita"].values)
+gini_maximin = gini_coefficient(results["per_capita_alloc"].values)
+gini_fema    = gini_coefficient(results["fema_per_capita"].values)
  
 gini_df = pd.DataFrame({
-    "Metric": ["Gini (Utilitarian)", "Gini (FEMA)"],
-    "Value": [gini_util, gini_fema]
+    "Metric": ["Gini (Maximin)", "Gini (FEMA)"],
+    "Value": [gini_maximin, gini_fema]
 })
-gini_df.to_csv("Results/Utilitarian/gini_coefficients.csv", index=False)
+gini_df.to_csv("Results/Maximin/gini_coefficients.csv", index=False)
  
 # Top 10 and Bottom 10 regions by allocation
 top10 = results.nlargest(10, "per_capita_alloc")
-top10.to_csv("Results/Utilitarian/top10_utilitarian.csv", index=False)
+top10.to_csv("Results/Maximin/top10_maximin.csv", index=False)
  
 funded = results[results["y_i"] == 1]
 bottom10 = funded.nsmallest(10, "per_capita_alloc")
-bottom10.to_csv("Results/Utilitarian/bottom10_utilitarian.csv", index=False)
+bottom10.to_csv("Results/Maximin/bottom10_maximin.csv", index=False)
 
 # Excluded regions (if any)
 excluded = results[results["y_i"] == 0]
 if len(excluded) > 0:
-    excluded.to_csv("Results/Utilitarian/excluded_regions.csv", index=False)
+    excluded.to_csv("Results/Maximin/excluded_regions.csv", index=False)
