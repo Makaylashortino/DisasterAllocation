@@ -103,7 +103,7 @@ for dr, label in DR_NAMES.items():
     print(f"  Avg per capita:        ${avg_per_cap:>15.2f}")
     print(f"  FEMA actual per cap:   ${fema_per_cap:>15.2f}")
  
-# ── Puerto Rico combined (Irma + Maria) ───────────────────────────────────────
+# Puerto Rico combined (Irma + Maria) 
 pr_all = results[results["state"] == "PR"]
 print(f"\n{'='*65}")
 print(f"PUERTO RICO COMBINED (Irma DR-4336 + Maria DR-4339)")
@@ -113,7 +113,7 @@ print(f"  Total need:            ${pr_all['d_i'].sum():>15,.2f}")
 print(f"  Avg % need met:        {pr_all['pct_need_met'].mean():>14.1f}%")
 print(f"  FEMA actual % met:     {(pr_all['ia_totalApprovedIhp'].sum() / pr_all['d_i'].sum() * 100):>13.1f}%")
  
-# ── Overall summary ───────────────────────────────────────────────────────────
+# Overall summary
 print(f"\n{'='*65}")
 print("OVERALL SUMMARY")
 print(f"{'='*65}")
@@ -123,6 +123,21 @@ print(f"  Total need:            ${results['d_i'].sum():>15,.2f}")
 print(f"  Overall % need met:    {results['x_i'].sum() / results['d_i'].sum() * 100:>14.1f}%")
 print(f"  Regions receiving aid: {sum(1 for a in allocation if a > 0)} of {len(df)}")
 
+def gini(values):
+    values = sorted([v for v in values if v >= 0])
+    n = len(values)
+    if n == 0:
+        return 0
+    cumsum = 0
+    for i, v in enumerate(values):
+        cumsum += (2 * (i + 1) - n - 1) * v
+    return cumsum / (n * sum(values)) if sum(values) > 0 else 0
+
+model_gini = gini(results["per_capita_alloc"].tolist())
+fema_gini  = gini(results["fema_per_capita"].tolist())
+
+print(f"\n  Gini (iterative model): {model_gini:.4f}")
+print(f"  Gini (FEMA actual):     {fema_gini:.4f}")
 
 results.to_csv("Results/IterativeModel_Results.csv", index=False)
 print(f"\nSaved to: IterativeModel_Results.csv")
