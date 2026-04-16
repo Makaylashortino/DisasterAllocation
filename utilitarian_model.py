@@ -2,16 +2,16 @@
 PROBLEM CONTEXT:
     We are reallocating $4.124 billion in FEMA Individual Assistance (IA) across 204 disaster-affected 
     regions from Hurricanes Harvey, Irma, and Maria. The goal is to maximize total weighted societal benefit, 
-    where each region's weight is its need-per-capita (n_i).
+    where each region's weight is its need-per-applicant (n_i).
  
 MATHEMATICAL FORMULATION:
     Sets & Indices
         I = {1, 2, ..., 204} set of regions (counties / municipios / islands)
  
     Data / Parameters (all read from ModelingInput.csv)
-        n_i = need per capita for region i      (= d_i / population_i)
+        n_i = need per applicant for region i      (= d_i / a_i)
         d_i = adjusted total need for region i  (dollars)
-        p_i = population of region i
+        a_i = adjusted applicants in region i
         B   = total budget = sum of ia_totalApprovedIhp = $4,124,000,952.74
  
     Decision Variables
@@ -21,7 +21,7 @@ MATHEMATICAL FORMULATION:
     Objective (Utilitarian — maximize weighted benefit)
         max  Σ_{i ∈ I} n_i · x_i
         - We want to maximize the total benefit across all regions, where each dollar of aid is weighted by 
-          how badly that region needs it on a per-capita basis. Regions with higher need-per-capita get a higher 
+          how badly that region needs it on a per-applicant basis. Regions with higher need-per-applicant get a higher 
           value in the objective, so the optimizer naturally prioritizes them.
  
     Constraints
@@ -48,7 +48,7 @@ MATHEMATICAL FORMULATION:
 Important notes on data preprocessing:
     Several regions (mainly in Puerto Rico and USVI) appear multiple times in the raw data because they were struck by 
     more than one hurricane We aggregate by (state, county) so that each community is represented exactly once in the model,
-    with its total need and population across all disasters. This is important to ensure that the model allocates aid at the 
+    with its total need and applicants across all disasters. This is important to ensure that the model allocates aid at the 
     community level rather than splitting it across  multiple rows for the same place.
 """
 
@@ -65,24 +65,25 @@ df = raw.groupby(["state", "county"]).agg(
     d_i=("d_i", "sum"),
     ia_totalApprovedIhp=("ia_totalApprovedIhp", "sum"),
     population=("population", "first"),
+    adjusted_applicants=("adjusted_applicants", "sum"),
     num_disasters=("disasterNumber", "count"),
     disaster_list=("disasterNumber", lambda x: list(x))
 ).reset_index()
  
-# Recompute per-capita metrics on the aggregated data
-df["n_i"] = df["d_i"] / df["population"]
-df["fema_per_capita"] = df["ia_totalApprovedIhp"] / df["population"]
+# Recompute per-applicant metrics on the aggregated data
+df["n_i"] = df["d_i"] / df["adjusted_applicants"]
+df["fema_per_applicant"] = df["ia_totalApprovedIhp"] / df["adjusted_applicants"]  # per capita based on applicants
  
 # Handle any regions with 0 population (shouldn't happen but be safe)
 df["n_i"] = df["n_i"].fillna(0)
-df["fema_per_capita"] = df["fema_per_capita"].fillna(0)
+df["fema_per_applicant"] = df["fema_per_applicant"].fillna(0)
  
 # Parameters
 n = len(df)                                        # 183 unique regions
 B = df["ia_totalApprovedIhp"].sum()                # total budget
 d_i = df["d_i"].values                             # adjusted need per region
-n_i = df["n_i"].values                             # need per capita per region
-pop = df["population"].values                      # population per region
+n_i = df["n_i"].values                             # need per applicant per region
+app = df["adjusted_applicants"].values                      # applicants per region
  
 print("MODEL 1 — UTILITARIAN (Weighted Social Welfare Maximization)")
 print(f"  Raw data rows     : {len(raw)}")
@@ -154,14 +155,14 @@ if model.status != GRB.OPTIMAL:
  
 
 # 4.  EXTRACT & ANALYZE RESULTS
-results = df[["state", "county", "population", "d_i", "n_i",
-              "ia_totalApprovedIhp", "fema_per_capita",
+results = df[["state", "county", "population", "adjusted_applicants", "d_i", "n_i",
+              "ia_totalApprovedIhp", "fema_per_applicant",
               "num_disasters", "disaster_list"]].copy()
  
 results["x_i_utilitarian"]  = [x[i].X for i in range(n)]
 results["y_i"]              = [int(round(y[i].X)) for i in range(n)]
 results["pct_need_met"]     = results["x_i_utilitarian"] / results["d_i"] * 100
-results["per_capita_alloc"] = results["x_i_utilitarian"] / results["population"]
+results["per_applicant_alloc"] = results["x_i_utilitarian"] / results["adjusted_applicants"]
 
 results.to_csv("Results/Utilitarian/utilitarian_results.csv", index=False)
  
@@ -181,7 +182,7 @@ summary_df = pd.DataFrame({
         total_alloc,
         B,
         100 * total_alloc / B,
-        regions_funded / n,
+        regions_funded,
         n - regions_funded
     ]
 })
@@ -194,32 +195,33 @@ state_summary = results.groupby("state").agg(
     total_allocation=("x_i_utilitarian", "sum"),
     total_fema_actual=("ia_totalApprovedIhp", "sum"),
     total_pop=("population", "sum"),
+    total_applicants=("adjusted_applicants", "sum"),
     regions_funded=("y_i", "sum")
 ).reset_index()
  
 state_summary["pct_need_met"]    = state_summary["total_allocation"] / state_summary["total_need"] * 100
-state_summary["per_capita_util"] = state_summary["total_allocation"] / state_summary["total_pop"]
-state_summary["per_capita_fema"] = state_summary["total_fema_actual"] / state_summary["total_pop"]
+state_summary["per_applicant_util"] = state_summary["total_allocation"] / state_summary["total_applicants"]
+state_summary["per_applicant_fema"] = state_summary["total_fema_actual"] / state_summary["total_applicants"]
 
 state_summary.to_csv("Results/Utilitarian/utilitarian_state_summary.csv", index=False)
  
-# PR vs TX per-capita ratio (key fairness metric)
+# PR vs TX per-applicant ratio (key fairness metric)
 pr_data = state_summary[state_summary["state"] == "PR"]
 tx_data = state_summary[state_summary["state"] == "TX"]
  
 if len(pr_data) > 0 and len(tx_data) > 0:
-    pr_pc_util = pr_data["per_capita_util"].values[0]
-    tx_pc_util = tx_data["per_capita_util"].values[0]
-    pr_pc_fema = pr_data["per_capita_fema"].values[0]
-    tx_pc_fema = tx_data["per_capita_fema"].values[0]
+    pr_pc_util = pr_data["per_applicant_util"].values[0]
+    tx_pc_util = tx_data["per_applicant_util"].values[0]
+    pr_pc_fema = pr_data["per_applicant_fema"].values[0]
+    tx_pc_fema = tx_data["per_applicant_fema"].values[0]
  
 pr_tx_df = pd.DataFrame({
     "Metric": [
-        "PR per capita (Utilitarian)",
-        "TX per capita (Utilitarian)",
+        "PR per applicant (Utilitarian)",
+        "TX per applicant (Utilitarian)",
         "PR/TX ratio (Utilitarian)",
-        "PR per capita (FEMA)",
-        "TX per capita (FEMA)",
+        "PR per applicant (FEMA)",
+        "TX per applicant (FEMA)",
         "PR/TX ratio (FEMA)"
     ],
     "Value": [
@@ -234,7 +236,7 @@ pr_tx_df = pd.DataFrame({
 pr_tx_df.to_csv("Results/Utilitarian/pr_vs_tx_fairness.csv", index=False)
 
  
-# Gini coefficient computation (on per-capita allocation)
+# Gini coefficient computation (on per-applicant allocation)
 def gini_coefficient(values):
     """Compute the Gini coefficient of a numpy array of values."""
     values = np.array(values, dtype=float)
@@ -246,8 +248,8 @@ def gini_coefficient(values):
     gini = (2.0 * np.sum((np.arange(1, n_vals + 1) * sorted_vals))) / (n_vals * np.sum(sorted_vals)) - (n_vals + 1) / n_vals
     return gini
  
-gini_util = gini_coefficient(results["per_capita_alloc"].values)
-gini_fema = gini_coefficient(results["fema_per_capita"].values)
+gini_util = gini_coefficient(results["per_applicant_alloc"].values)
+gini_fema = gini_coefficient(results["fema_per_applicant"].values)
  
 gini_df = pd.DataFrame({
     "Metric": ["Gini (Utilitarian)", "Gini (FEMA)"],
@@ -256,11 +258,11 @@ gini_df = pd.DataFrame({
 gini_df.to_csv("Results/Utilitarian/gini_coefficients.csv", index=False)
  
 # Top 10 and Bottom 10 regions by allocation
-top10 = results.nlargest(10, "per_capita_alloc")
+top10 = results.nlargest(10, "per_applicant_alloc")
 top10.to_csv("Results/Utilitarian/top10_utilitarian.csv", index=False)
  
 funded = results[results["y_i"] == 1]
-bottom10 = funded.nsmallest(10, "per_capita_alloc")
+bottom10 = funded.nsmallest(10, "per_applicant_alloc")
 bottom10.to_csv("Results/Utilitarian/bottom10_utilitarian.csv", index=False)
 
 # Excluded regions (if any)

@@ -1,7 +1,7 @@
 Metric,Value
-PR per capita (Utilitarian),951.6144187306517
-TX per capita (Utilitarian),76.7226279686228
-PR/TX ratio (Utilitarian),12.403308436199978
-PR per capita (FEMA),395.3256066326242
-TX per capita (FEMA),192.14208707706155
-PR/TX ratio (FEMA),2.0574649346557417
+PR per applicant (Utilitarian),589.7320650347291
+TX per applicant (Utilitarian),1781.6016818201815
+PR/TX ratio (Utilitarian),0.3310122969979612
+PR per applicant (FEMA),481.7310564781391
+TX per applicant (FEMA),1307.7832027525596
+PR/TX ratio (FEMA),0.36835696884943514
