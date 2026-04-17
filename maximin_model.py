@@ -76,14 +76,14 @@ df = raw.groupby(["state", "county"]).agg(
     d_i=("d_i", "sum"),
     ia_totalApprovedIhp=("ia_totalApprovedIhp", "sum"),
     population=("population", "first"),
-    adjusted_applicants=("adjusted_applicants", "sum"),
+    applicants=("ia_validRegistrations", "sum"),
     num_disasters=("disasterNumber", "count"),
     disaster_list=("disasterNumber", lambda x: list(x))
 ).reset_index()
  
 # Recompute per-applicant metrics on the aggregated data
-df["n_i"] = df["d_i"] / df["adjusted_applicants"]
-df["fema_per_applicant"] = df["ia_totalApprovedIhp"] / df["adjusted_applicants"]  # per capita based on applicants
+df["n_i"] = df["d_i"] / df["applicants"]
+df["fema_per_applicant"] = df["ia_totalApprovedIhp"] / df["applicants"]  # per capita based on applicants
  
 # Handle any regions with 0 population (shouldn't happen but be safe)
 df["n_i"] = df["n_i"].fillna(0)
@@ -94,7 +94,7 @@ n = len(df)                                        # 183 unique regions
 B = df["ia_totalApprovedIhp"].sum()                # total budget
 d_i = df["d_i"].values                             # adjusted need per region
 n_i = df["n_i"].values                             # need per applicant per region
-app = df["adjusted_applicants"].values             # applicants per region
+app = df["applicants"].values                      # applicants per region
 M = n_i.max()                                      # Big M for maximin linking constraints
 
 print("MODEL 2 — MAXIMIN (Maximize Minimum Per-Capita Allocation)")
@@ -174,14 +174,14 @@ if model.status != GRB.OPTIMAL:
     print(f"WARNING: Solver status = {model.status}")
 
 # 4.  EXTRACT & ANALYZE RESULTS
-results = df[["state", "county", "population", "adjusted_applicants", "d_i", "n_i",
+results = df[["state", "county", "population", "applicants", "d_i", "n_i",
               "ia_totalApprovedIhp", "fema_per_applicant",
               "num_disasters", "disaster_list"]].copy()
  
 results["x_i_maximin"]      = [x[i].X for i in range(n)]
 results["y_i"]              = [int(round(y[i].X)) for i in range(n)]
 results["pct_need_met"]     = results["x_i_maximin"] / results["d_i"] * 100
-results["per_applicant_alloc"] = results["x_i_maximin"] / results["adjusted_applicants"]
+results["per_applicant_alloc"] = results["x_i_maximin"] / results["applicants"]
 
 results.to_csv("Results/Maximin/maximin_results.csv", index=False)
  
@@ -217,7 +217,7 @@ state_summary = results.groupby("state").agg(
     total_allocation=("x_i_maximin", "sum"),
     total_fema_actual=("ia_totalApprovedIhp", "sum"),
     total_pop=("population", "sum"),
-    total_applicants=("adjusted_applicants", "sum"),
+    total_applicants=("applicants", "sum"),
     regions_funded=("y_i", "sum")
 ).reset_index()
 
