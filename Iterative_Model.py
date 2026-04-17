@@ -4,11 +4,11 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 from pathlib import Path
  
-# ── Output folder ─────────────────────────────────────────────────────────────
+# Output folder
 OUTPUT = Path("Results/Iterative")
 OUTPUT.mkdir(parents=True, exist_ok=True)
  
-# ── Load data ─────────────────────────────────────────────────────────────────
+# Load data 
 df = pd.read_csv("Data/ModelingInput.csv", low_memory=False)
 B  = df["ia_totalApprovedIhp"].sum()
  
@@ -19,14 +19,14 @@ remaining_budget = B
 raw_applicants = df["ia_validRegistrations"].values.copy()
 d_i            = df["d_i"].values.copy()
  
-# ── Floor pass: every region gets 10% of need guaranteed ─────────────────────
+# Floor pass: every region gets 10% of need guaranteed
 for i in range(len(df)):
     floor = min(0.10 * d_i[i], remaining_budget)
     allocation[i]     += floor
     remaining_need[i] -= floor
     remaining_budget  -= floor
  
-# ── Main iterative loop ───────────────────────────────────────────────────────
+# Main loop
 iteration      = 0
 max_iterations = 1_000_000
  
@@ -56,7 +56,7 @@ while remaining_budget > 0.01 and iteration < max_iterations:
     remaining_budget       -= increment
     iteration += 1
  
-# ── Build results dataframe ───────────────────────────────────────────────────
+# Build results dataframe 
 results = df.copy()
 results["x_i"]                   = allocation
 results["pct_need_met"]          = results["x_i"] / results["d_i"] * 100
@@ -66,7 +66,7 @@ results["starting_need_per_app"] = results["d_i"] / results["ia_validRegistratio
 results["fema_remaining_per_app"]  = ((results["d_i"] - results["ia_totalApprovedIhp"]) / results["ia_validRegistrations"]).clip(lower=0)
 results["model_remaining_per_app"] = ((results["d_i"] - results["x_i"]) / results["ia_validRegistrations"]).clip(lower=0)
  
-# ── Gini ──────────────────────────────────────────────────────────────────────
+# Gini 
 def gini(values):
     v = sorted([x for x in values if x >= 0])
     n = len(v)
@@ -74,7 +74,7 @@ def gini(values):
         return 0
     return sum((2*(i+1) - n - 1) * vi for i, vi in enumerate(v)) / (n * sum(v))
  
-# ── Disaster labels ───────────────────────────────────────────────────────────
+# Disaster labels 
 DR_NAMES = {
     4332: "Harvey - Texas",
     4335: "Irma - USVI",
@@ -86,14 +86,12 @@ DR_NAMES = {
     4346: "Irma - South Carolina",
 }
  
-# ══════════════════════════════════════════════════════════════════════════════
+
 # CSV 1: Region-level results
-# ══════════════════════════════════════════════════════════════════════════════
 results.to_csv(OUTPUT / "region_results.csv", index=False)
  
-# ══════════════════════════════════════════════════════════════════════════════
+
 # CSV 2: Disaster-level summary
-# ══════════════════════════════════════════════════════════════════════════════
 summary_rows = []
 for dr, label in DR_NAMES.items():
     sub = results[results["disasterNumber"] == dr]
@@ -120,9 +118,9 @@ for dr, label in DR_NAMES.items():
 summary_df = pd.DataFrame(summary_rows)
 summary_df.to_csv(OUTPUT / "disaster_summary.csv", index=False)
  
-# ══════════════════════════════════════════════════════════════════════════════
+
 # CSV 3: Overall stats
-# ══════════════════════════════════════════════════════════════════════════════
+
 std_start = results["starting_need_per_app"].std()
 std_fema  = results["fema_remaining_per_app"].std()
 std_model = results["model_remaining_per_app"].std()
