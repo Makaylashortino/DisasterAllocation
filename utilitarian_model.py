@@ -269,3 +269,360 @@ bottom10.to_csv("Results/Utilitarian/bottom10_utilitarian.csv", index=False)
 excluded = results[results["y_i"] == 0]
 if len(excluded) > 0:
     excluded.to_csv("Results/Utilitarian/excluded_regions.csv", index=False)
+
+
+#####Graphs and visualizations########
+import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
+import numpy as np
+
+# ══════════════════════════════════════════════════════════════════════════════
+# REMAINING NEED ANALYSIS — UTILITARIAN MODEL
+# Groups by state (aggregated model has no disaster-level rows)
+# ══════════════════════════════════════════════════════════════════════════════
+
+# Compute remaining need per applicant for three scenarios
+results["starting_need_per_app"]   = results["d_i"] / results["applicants"]
+results["fema_remaining_per_app"]  = (results["d_i"] - results["ia_totalApprovedIhp"]) / results["applicants"]
+results["model_remaining_per_app"] = (results["d_i"] - results["x_i_utilitarian"]) / results["applicants"]
+
+# Clip negatives to zero (fully funded regions)
+results["fema_remaining_per_app"]  = results["fema_remaining_per_app"].clip(lower=0)
+results["model_remaining_per_app"] = results["model_remaining_per_app"].clip(lower=0)
+
+# ── State grouping ─────────────────────────────────────────────────────────
+# State order: largest to smallest by total need, PR and VI last for emphasis
+STATE_LABELS = {
+    "TX": "Harvey\nTexas",
+    "FL": "Irma\nFlorida",
+    "GA": "Irma\nGeorgia",
+    "PR": "Irma + Maria\nPuerto Rico",
+    "VI": "Irma + Maria\nUSVI",
+}
+
+# ── Print summary table ────────────────────────────────────────────────────
+print(f"\n{'='*80}")
+print("REMAINING NEED PER APPLICANT — BEFORE vs AFTER ALLOCATION (BY STATE)")
+print(f"{'='*80}")
+print(f"{'State':<22} {'Starting':>12} {'After FEMA':>12} {'After Model':>12} {'FEMA Gap':>10} {'Model Gap':>10}")
+print(f"{'-'*80}")
+
+for state, label in STATE_LABELS.items():
+    sub = results[results["state"] == state]
+    if len(sub) == 0:
+        continue
+    # Use sum-weighted averages: aggregate dollars then divide
+    total_app   = sub["applicants"].sum()
+    start       = sub["d_i"].sum() / total_app
+    fema_r      = max((sub["d_i"].sum() - sub["ia_totalApprovedIhp"].sum()) / total_app, 0)
+    mod_r       = max((sub["d_i"].sum() - sub["x_i_utilitarian"].sum()) / total_app, 0)
+    print(f"{label.replace(chr(10), ' '):<22} ${start:>10,.0f} ${fema_r:>10,.0f} ${mod_r:>10,.0f} "
+          f"{fema_r/start*100:>9.1f}% {mod_r/start*100:>9.1f}%")
+
+# ── Convergence metrics ────────────────────────────────────────────────────
+print(f"\n{'='*80}")
+print("CONVERGENCE METRICS (std deviation of remaining need per applicant)")
+print(f"{'='*80}")
+
+std_start = results["starting_need_per_app"].std()
+std_fema  = results["fema_remaining_per_app"].std()
+std_model = results["model_remaining_per_app"].std()
+
+print(f"  Std dev before allocation:   ${std_start:>10,.2f}")
+print(f"  Std dev after FEMA:          ${std_fema:>10,.2f}  (change: {(std_fema-std_start)/std_start*100:+.1f}%)")
+print(f"  Std dev after model:         ${std_model:>10,.2f}  (change: {(std_model-std_start)/std_start*100:+.1f}%)")
+print(f"\n  Lower std dev = more equal remaining need across regions")
+print(f"  Model {'MORE' if std_model < std_fema else 'LESS'} equal than FEMA in remaining need")
+
+# ── Build chart arrays ─────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+# GRAPH 1 — % OF NEED MET: MODEL VS FEMA BY STATE
+# ══════════════════════════════════════════════════════════════════════════════
+
+labels_g1  = []
+fema_pct   = []
+model_pct  = []
+
+for state, label in STATE_LABELS.items():
+    sub = results[results["state"] == state]
+    if len(sub) == 0:
+        continue
+    total_need  = sub["d_i"].sum()
+    labels_g1.append(label)
+    fema_pct.append(sub["ia_totalApprovedIhp"].sum() / total_need * 100)
+    model_pct.append(sub["x_i_utilitarian"].sum() / total_need * 100)
+
+x     = np.arange(len(labels_g1))
+width = 0.35
+
+fig, ax = plt.subplots(figsize=(13, 6))
+fig.patch.set_facecolor("white")
+ax.set_facecolor("white")
+
+bars1 = ax.bar(x - width/2, fema_pct,  width, label="FEMA",        color="#CC3333", zorder=3)
+bars2 = ax.bar(x + width/2, model_pct, width, label="Utilitarian",  color="#3366CC", zorder=3)
+
+def label_bars_pct(bars, color):
+    for bar in bars:
+        h = bar.get_height()
+        ax.annotate(
+            f"{h:.1f}%",
+            xy=(bar.get_x() + bar.get_width() / 2, h),
+            xytext=(0, 4),
+            textcoords="offset points",
+            ha="center", va="bottom",
+            fontsize=8, color=color
+        )
+
+label_bars_pct(bars1, "#991111")
+label_bars_pct(bars2, "#1A3D99")
+
+ax.set_xticks(x)
+ax.set_xticklabels(labels_g1, fontsize=10)
+ax.set_ylabel("% of adjusted need met", fontsize=11)
+ax.set_title(
+    "% of need met: FEMA vs utilitarian model by state",
+    fontsize=12, fontweight="normal", pad=14
+)
+ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda v, _: f"{v:.0f}%"))
+ax.grid(axis="y", linestyle="--", alpha=0.3, zorder=1)
+ax.spines["top"].set_visible(False)
+ax.spines["right"].set_visible(False)
+
+legend_patches = [
+    mpatches.Patch(color="#CC3333", label="FEMA"),
+    mpatches.Patch(color="#3366CC", label="Utilitarian model"),
+]
+ax.legend(handles=legend_patches, fontsize=10, frameon=False,
+          loc="upper center", bbox_to_anchor=(0.5, 1.0), ncol=2)
+
+plt.tight_layout()
+plt.savefig("Results/Charts/UTIL_pct_need_met.jpeg", dpi=150,
+            bbox_inches="tight", format="jpeg")
+plt.show()
+
+# ══════════════════════════════════════════════════════════════════════════════
+# GRAPH 2 — PER-APPLICANT ALLOCATION: MODEL VS FEMA BY STATE
+# ══════════════════════════════════════════════════════════════════════════════
+
+labels_g2      = []
+fema_per_app   = []
+model_per_app  = []
+
+for state, label in STATE_LABELS.items():
+    sub = results[results["state"] == state]
+    if len(sub) == 0:
+        continue
+    total_app = sub["applicants"].sum()
+    labels_g2.append(label)
+    fema_per_app.append(sub["ia_totalApprovedIhp"].sum() / total_app)
+    model_per_app.append(sub["x_i_utilitarian"].sum() / total_app)
+
+x     = np.arange(len(labels_g2))
+width = 0.35
+
+fig, ax = plt.subplots(figsize=(13, 6))
+fig.patch.set_facecolor("white")
+ax.set_facecolor("white")
+
+bars1 = ax.bar(x - width/2, fema_per_app,  width, label="FEMA",       color="#CC3333", zorder=3)
+bars2 = ax.bar(x + width/2, model_per_app, width, label="Utilitarian", color="#3366CC", zorder=3)
+
+def label_bars_dollar(bars, color):
+    for bar in bars:
+        h = bar.get_height()
+        ax.annotate(
+            f"${h:,.0f}",
+            xy=(bar.get_x() + bar.get_width() / 2, h),
+            xytext=(0, 4),
+            textcoords="offset points",
+            ha="center", va="bottom",
+            fontsize=8, color=color
+        )
+
+label_bars_dollar(bars1, "#991111")
+label_bars_dollar(bars2, "#1A3D99")
+
+ax.set_xticks(x)
+ax.set_xticklabels(labels_g2, fontsize=10)
+ax.set_ylabel("Dollars per applicant ($)", fontsize=11)
+ax.set_title(
+    "Per-applicant allocation: FEMA vs utilitarian model by state",
+    fontsize=12, fontweight="normal", pad=14
+)
+ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda v, _: f"${v:,.0f}"))
+ax.grid(axis="y", linestyle="--", alpha=0.3, zorder=1)
+ax.spines["top"].set_visible(False)
+ax.spines["right"].set_visible(False)
+
+legend_patches = [
+    mpatches.Patch(color="#CC3333", label="FEMA"),
+    mpatches.Patch(color="#3366CC", label="Utilitarian model"),
+]
+ax.legend(handles=legend_patches, fontsize=10, frameon=False,
+          loc="upper center", bbox_to_anchor=(0.5, 1.0), ncol=2)
+
+plt.tight_layout()
+plt.savefig("Results/Charts/UTIL_per_applicant_allocation.jpeg", dpi=150,
+            bbox_inches="tight", format="jpeg")
+plt.show()
+
+# ══════════════════════════════════════════════════════════════════════════════
+# GRAPH 3 — REMAINING NEED PER APPLICANT: BEFORE vs AFTER FEMA vs AFTER MODEL
+# ══════════════════════════════════════════════════════════════════════════════
+# ── Build chart arrays ─────────────────────────────────────────────────────
+labels  = []
+start   = []
+fema_r  = []
+model_r = []
+
+for state, label in STATE_LABELS.items():
+    sub = results[results["state"] == state]
+    if len(sub) == 0:
+        continue
+    total_app = sub["applicants"].sum()
+    labels.append(label)
+    start.append(sub["d_i"].sum() / total_app)
+    fema_r.append(max((sub["d_i"].sum() - sub["ia_totalApprovedIhp"].sum()) / total_app, 0))
+    model_r.append(max((sub["d_i"].sum() - sub["x_i_utilitarian"].sum()) / total_app, 0))
+
+# ── Chart setup ───────────────────────────────────────────────────────────
+x     = np.arange(len(labels))
+width = 0.25
+
+fig, ax = plt.subplots(figsize=(13, 6))
+fig.patch.set_facecolor("white")
+ax.set_facecolor("white")
+
+# ── Bars ──────────────────────────────────────────────────────────────────
+bars1 = ax.bar(x - width, start,   width, label="Starting need",  color="#B4B2A9", zorder=3)
+bars2 = ax.bar(x,         fema_r,  width, label="After FEMA",     color="#CC3333", zorder=3)
+bars3 = ax.bar(x + width, model_r, width, label="After model",    color="#3366CC", zorder=3)
+
+# ── Value labels ──────────────────────────────────────────────────────────
+def label_bars(bars, color):
+    for bar in bars:
+        h = bar.get_height()
+        if h > 50:
+            ax.annotate(
+                f"${h:,.0f}",
+                xy=(bar.get_x() + bar.get_width() / 2, h),
+                xytext=(0, 4),
+                textcoords="offset points",
+                ha="center", va="bottom",
+                fontsize=7.5, color=color
+            )
+
+label_bars(bars1, "#5F5E5A")
+label_bars(bars2, "#991111")
+label_bars(bars3, "#1A3D99")
+
+# ── Convergence line ──────────────────────────────────────────────────────
+avg_model = np.mean(model_r)
+ax.axhline(avg_model, color="#3366CC", linewidth=1.2, linestyle="--", alpha=0.6, zorder=2)
+ax.annotate(
+    f"Model convergence ≈ ${avg_model:,.0f}",
+    xy=(len(labels) - 0.5, avg_model),
+    xytext=(-8, 6),
+    textcoords="offset points",
+    ha="right", fontsize=9, color="#1A3D99"
+)
+
+# ── Axes and labels ───────────────────────────────────────────────────────
+ax.set_xticks(x)
+ax.set_xticklabels(labels, fontsize=10)
+ax.set_ylabel("Remaining need per applicant ($)", fontsize=11)
+ax.set_title(
+    "Remaining need per applicant: before, after FEMA, and after utilitarian model",
+    fontsize=12, fontweight="normal", pad=14
+)
+ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda v, _: f"${v:,.0f}"))
+ax.grid(axis="y", linestyle="--", alpha=0.3, zorder=1)
+ax.spines["top"].set_visible(False)
+ax.spines["right"].set_visible(False)
+
+# ── Legend ────────────────────────────────────────────────────────────────
+legend_patches = [
+    mpatches.Patch(color="#B4B2A9", label="Starting need"),
+    mpatches.Patch(color="#CC3333", label="After FEMA"),
+    mpatches.Patch(color="#3366CC", label="After utilitarian model"),
+]
+ax.legend(handles=legend_patches, fontsize=10, frameon=False, 
+          loc="upper center", bbox_to_anchor=(0.5, 1.0), ncol=3)
+
+# ── Std dev annotation box ────────────────────────────────────────────────
+annotation = (
+    f"Std dev of remaining need:\n"
+    f"  Before:      ${std_start:,.0f}\n"
+    f"  After FEMA:  ${std_fema:,.0f}  ({(std_fema-std_start)/std_start*100:+.0f}%)\n"
+    f"  After model: ${std_model:,.0f}  ({(std_model-std_start)/std_start*100:+.0f}%)"
+)
+ax.text(
+    0.01, 0.97, annotation,
+    transform=ax.transAxes,
+    fontsize=8.5, verticalalignment="top",
+    bbox=dict(boxstyle="round,pad=0.4", facecolor="#DDEEFF", edgecolor="#3366CC", alpha=0.8)
+)
+
+plt.tight_layout()
+plt.savefig("Results/Charts/UTIL_remaining_need_convergence.jpeg", dpi=150,
+            bbox_inches="tight", format="jpeg")
+plt.show()
+
+
+# ══════════════════════════════════
+# ════════════════════════════════════════════
+# GRAPH 4 — GINI COEFFICIENT: MODEL VS FEMA
+# ══════════════════════════════════════════════════════════════════════════════
+
+gini_util = gini_coefficient(results["per_applicant_alloc"].values)
+gini_fema = gini_coefficient(results["fema_per_applicant"].values)
+
+fig, ax = plt.subplots(figsize=(7, 6))
+fig.patch.set_facecolor("white")
+ax.set_facecolor("white")
+
+bars = ax.bar(
+    ["FEMA", "Utilitarian model"],
+    [gini_fema, gini_util],
+    color=["#CC3333", "#3366CC"],
+    width=0.4,
+    zorder=3
+)
+
+for bar, val in zip(bars, [gini_fema, gini_util]):
+    ax.annotate(
+        f"{val:.4f}",
+        xy=(bar.get_x() + bar.get_width() / 2, val),
+        xytext=(0, 6),
+        textcoords="offset points",
+        ha="center", va="bottom",
+        fontsize=11, fontweight="bold",
+        color=bar.get_facecolor()
+    )
+
+ax.set_ylabel("Gini coefficient", fontsize=11)
+ax.set_title(
+    "Gini coefficient: FEMA vs utilitarian model\n(per-applicant allocation)",
+    fontsize=12, fontweight="normal", pad=14
+)
+ax.set_ylim(0, max(gini_fema, gini_util) * 1.3)
+ax.grid(axis="y", linestyle="--", alpha=0.3, zorder=1)
+ax.spines["top"].set_visible(False)
+ax.spines["right"].set_visible(False)
+
+# Explanatory note
+ax.text(
+    0.5, 0.15,
+    "Note: A higher Gini in the utilitarian model reflects\n"
+    "equity (routing dollars to highest-need regions),\n"
+    "not inequality.",
+    transform=ax.transAxes,
+    fontsize=9, ha="center", va="bottom",
+    bbox=dict(boxstyle="round,pad=0.4", facecolor="#DDEEFF", edgecolor="#3366CC", alpha=0.8)
+)
+
+plt.tight_layout()
+plt.savefig("Results/Charts/UTIL_gini_comparison.jpeg", dpi=150,
+            bbox_inches="tight", format="jpeg")
+plt.show()
