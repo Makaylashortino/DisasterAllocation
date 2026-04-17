@@ -1,0 +1,2 @@
+total_budget,total_allocated,total_need,overall_pct_need_met,regions_funded,total_regions,iterations,gini_model,gini_fema,std_dev_before,std_dev_after_fema,std_dev_after_model,std_dev_pct_change_fema,std_dev_pct_change_model
+4124000952.74,4124000952.74,7336134796.22,56.2,192,204,13622,0.6161,0.4521,2314.51,1354.25,286.51,-41.5,-87.6
